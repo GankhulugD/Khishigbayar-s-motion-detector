@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-fill: var(--fill);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-sep: var(--sep);
+  --color-brand: #ff375f;
+}
+
+:root {
+  --bg: #f2f2f7;
+  --card: #ffffff;
+  --fill: #f2f2f7;
+  --ink: #1c1c1e;
+  --muted: #8e8e93;
+  --sep: rgba(60, 60, 67, 0.12);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.04);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --card: #1c1c1e;
+    --fill: #2c2c2e;
+    --ink: #f2f2f7;
+    --muted: #98989f;
+    --sep: rgba(84, 84, 88, 0.55);
+    --shadow: none;
+    color-scheme: dark;
+  }
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+.card {
+  background: var(--card);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes pulse-dot {
+  0% { box-shadow: 0 0 0 0 rgba(48, 176, 122, 0.55); }
+  70% { box-shadow: 0 0 0 8px rgba(48, 176, 122, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(48, 176, 122, 0); }
+}
+.live-dot {
+  animation: pulse-dot 1.8s infinite;
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.fade-up {
+  animation: fade-up 0.35s ease-out;
+}
