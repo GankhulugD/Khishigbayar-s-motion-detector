@@ -4,12 +4,13 @@
   "private": true,
   "description": "MPU6050 + ESP32-S3 хөдөлгөөн таних системийн веб хяналтын самбар (demo)",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -H 0.0.0.0",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -H 0.0.0.0",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@upstash/redis": "^1.39.0",
     "next": "16.4.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"

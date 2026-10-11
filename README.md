@@ -49,6 +49,31 @@ ESP32-C3 (MPU9250 50 Hz) ──Wi-Fi, 250 мс тутам POST /api/ingest──
 **Анхаар:** Одоогийн baseline ангилагч мэдрэгчийг бүсэлхийд зүүсэн гэж тооцсон. Бугуйд зүүхэд тэнхлэгийн чиглэл өөр тул
 бодит өгөгдөл цуглуулж `ml/train.py`-аар загвар сургах хэрэгтэй.
 
+## Ижил Wi-Fi-д байгаа бүх төхөөрөмжөөс нээх (локал)
+
+`npm run dev` нь бүх сүлжээний интерфейс дээр (`-H 0.0.0.0`) ажиллана. Утас, таблет, өөр компьютерээс
+`http://<компьютерийн IP>:3000` эсвэл `http://Gankhulugs-MacBook-Air.local:3000` гэж нээнэ.
+`next.config.ts`-ийн `allowedDevOrigins` нь 10.x / 192.168.x / 172.x болон `*.local` хаягийг зөвшөөрсөн.
+macOS дээр «Firewall» асаалттай бол `node`-д ирэх холболтыг зөвшөөрнө үү.
+
+## Deploy (Vercel)
+
+Vercel-ийн функцууд санах ой хуваалцдаггүй тул сервер **Upstash Redis**-д төлөвөө хадгална (`lib/server/cloud.ts`).
+`KV_REST_API_URL` / `KV_REST_API_TOKEN` орчны хувьсагч байвал автоматаар «үүлэн горим»-д шилжинэ:
+ESP32 → `https://<app>.vercel.app/api/ingest` (0.5 сек тутам) → Redis → веб `/api/live`-аас 0.5 сек тутам авна.
+
+1. Кодоо GitHub руу push хийнэ → [vercel.com/new](https://vercel.com/new) → репогоо Import.
+2. Project → **Storage** → **Upstash for Redis** (Marketplace) → Create → Connect project.
+   Бүс (region) нь Tokyo/Seoul орчим байвал хурдан (функцийн бүс `vercel.json`-д `icn1` = Сөүл).
+3. Project → Settings → **Environment Variables**: `DEVICE_API_KEY=<нууц үг>` нэмээд **Redeploy**.
+4. Firmware-ийн `SERVER_HOSTS`-д `"https://<app>.vercel.app"` нэмж, `DEVICE_KEY`-г ижил болгоод upload хийнэ.
+   Локал компьютерүүдийг жагсаалтад үлдээж болно — ESP32 бүгд рүү нь зэрэг илгээнэ.
+
+Хязгаар (үнэгүй багц): Upstash 500K команд/сар ≈ 1 төхөөрөмж + 1 үзэгчтэй 20+ цаг тасралтгүй урсгал;
+Vercel Hobby 1M дуудлага/сар. Илүү хэрэгтэй бол Upstash pay-as-you-go ($0.2 / 100K команд).
+HTTPS хуудаснаас хөтөч ESP32 руу `ws://` шууд холбогдож чадахгүй тул deploy хийсэн хувилбарт дохио
+сервероор дамжиж ≈0.5–1 сек хоцорно; ижил Wi-Fi дээр локал серверээр (http) нээвэл шууд (WebSocket) харагдана.
+
 ## Хуудсууд
 
 | Хуудас | Агуулга |

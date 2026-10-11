@@ -1,3 +1,4 @@
+import { cloudEnabled } from "@/lib/server/cloud";
 import { activeDeviceId, bus, buildSnapshot } from "@/lib/server/pipeline";
 import { getRepository } from "@/lib/server/store";
 import type { SensorSample } from "@/lib/types";
@@ -12,6 +13,12 @@ export const runtime = "nodejs";
  *   event "samples" — мэдрэгчийн түүхий утгууд, төхөөрөмжөөс ирэнгүүт шууд
  */
 export async function GET(req: Request) {
+  // Үүлэн (Vercel) горимд серверүүд санах ой хуваалцахгүй тул SSE биш, /api/live-аар асууна
+  if (cloudEnabled) {
+    return new Response("event: mode\ndata: poll\n\n", {
+      headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform" },
+    });
+  }
   ensureSimulator();
   const enc = new TextEncoder();
   let cleanup = () => {};

@@ -1,3 +1,4 @@
+import { cloudEnabled } from "./cloud";
 import type { Activity, SensorSample } from "../types";
 import { ingest, startOfToday } from "./pipeline";
 import { getRepository } from "./store";
@@ -80,7 +81,8 @@ function backfill() {
 }
 
 export function ensureSimulator() {
-  if (process.env.SIMULATE === "false" || g.__sim) return;
+  // Үүлэн (Vercel) горимд serverless тул setInterval ажиллахгүй → demo унтраана
+  if (process.env.SIMULATE === "false" || g.__sim || cloudEnabled) return;
   const repo = getRepository();
   repo.upsertDevice({ deviceId: DEVICE_ID, name: "Demo төхөөрөмж", simulated: true, sampleRateHz: HZ, battery: 86, rssi: -58 });
   backfill();

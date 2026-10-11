@@ -25,7 +25,10 @@
 // ============================== ТОХИРГОО ==============================
 #define WIFI_SSID      "YOUR_WIFI_NAME"       // Wi-Fi нэр (зөвхөн 2.4 GHz)
 #define WIFI_PASSWORD  "YOUR_WIFI_PASSWORD"   // Wi-Fi нууц үг
-#define SERVER_HOST    "192.168.1.20"         // Компьютерийн IP (macOS: ipconfig getifaddr en0)
+// Сервер ажиллуулах компьютерүүд: нэр + ".local" (IP солигдсон ч олно). IP бичиж ч болно: "10.37.229.53"
+// Windows-ийн нэрийг cmd дээр `hostname` гэж бичиж олно.
+// Deploy хийсэн (интернэт) сервер: "https://<таны-app>.vercel.app" гэж бүтэн хаягаар нэмнэ.
+#define SERVER_HOSTS   "Gankhulugs-MacBook-Air.local", "WINDOWS-NAME.local", "https://YOUR-APP.vercel.app"
 #define SERVER_PORT    3000                   // Next.js порт
 #define DEVICE_KEY     "dev-secret-key"       // .env.local доторх DEVICE_API_KEY
 #define DEVICE_ID      "esp32c3-01"           // Төхөөрөмжийн нэр (веб дээр харагдана)
@@ -36,11 +39,15 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <ESPmDNS.h>
+#define MDNS_NAME "motioncare"   // ESP32 өөрөө motioncare.local нэрээр зарлагдана
 
 static const int      PIN_SDA       = 6;
 static const int      PIN_SCL       = 7;
 static const uint32_t SAMPLE_HZ     = 50;    // мэдрэгч унших давтамж
-static const uint32_t SEND_EVERY_MS = 100;   // сервер рүү (ML) илгээх давтамж
+static const uint32_t SEND_EVERY_MS = 100;   // сервер рүү (ML) илгээх давтамж (зөвхөн локал сервертэй үед)
+static const uint32_t SEND_EVERY_CLOUD_MS = 500;   // интернэт (https) сервер байвал — Vercel/Redis-ийн хязгаар хэмнэнэ
 static const uint16_t WS_PORT       = 81;    // веб шууд холбогдох WebSocket порт (ws://<IP>:81)
 static const uint16_t MAX_PER_POST  = 50;    // нэг илгээлтэд хамгийн их хэмжилт
 static const uint16_t RING_SIZE     = 256;   // сүлжээ тасарсан үеийн буфер (~5 сек)
@@ -76,6 +83,11 @@ static void putBack(const Sample* in, uint16_t n);
 static void drawScreen();
 static void parseResponse(const String& r);
 static void ensureWifi();
+static void hostCopy(char* dst, size_t cap, const char* src, size_t n);
+static bool isHttps(int k);
+static bool placeholder(int k);
+static bool resolveServer(int k);
+static bool postTo(int k, const String& body);
 static void sendBatch();
 static void netTask(void*);
 static void sha1digest(const uint8_t* msg, size_t len, uint8_t out[20]);
@@ -458,9 +470,112 @@ static void ensureWifi() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
+// ---------------------------------------------------------------- серверүүд (Mac, Windows …)
+// SERVER_HOSTS дахь хаяг бүр IP, ".local" (mDNS нэр) эсвэл DNS нэр байж болно.
+// Асаалттай байгаа БҮХ сервер рүү ижил өгөгдлийг илгээнэ. Унтарсан серверийг 20 сек тутам л шалгана,
+// тиймээс нэг компьютер унтраастай байсан ч нөгөө нь саатахгүй.
+static const char* const SERVER_LIST[] = { SERVER_HOSTS };
+static const int SERVER_N = sizeof(SERVER_LIST) / sizeof(SERVER_LIST[0]);
+static const uint32_t RETRY_OFFLINE_MS = 20000;
+struct SrvSlot {
+  char ip[48];          // олдсон IP ("" = олдоогүй)
+  uint8_t fails;        // дараалсан алдаа
+  uint32_t nextTry;     // унтарсан бол дараагийн оролдлогын цаг
+  WiFiClient tcp;
+  WiFiClientSecure tls; // https:// серверт
+  HTTPClient http;
+};
+static SrvSlot servers[SERVER_N];
+
+static void hostCopy(char* dst, size_t cap, const char* src, size_t n) {
+  if (n >= cap) n = cap - 1;
+  memcpy(dst, src, n);
+  dst[n] = 0;
+}
+
+static bool isHttps(int k) { return strncmp(SERVER_LIST[k], "https://", 8 ) == 0; }
+static bool placeholder(int k) { return strstr(SERVER_LIST[k], "YOUR-APP") || strstr(SERVER_LIST[k], "WINDOWS-NAME"); }
+
+static bool resolveServer(int k) {
+  const char* host = SERVER_LIST[k];
+  SrvSlot& sv = servers[k];
+  IPAddress ip;
+  if (ip.fromString(host)) {
+    hostCopy(sv.ip, sizeof(sv.ip), host, strlen(host));
+    return true;
+  }
+  size_t len = strlen(host);
+  if (len > 6 && strcasecmp(host + len - 6, ".local") == 0) {
+    static bool mdnsOk = false;
+    if (!mdnsOk) mdnsOk = MDNS.begin(MDNS_NAME);
+    char name[64];
+    hostCopy(name, sizeof(name), host, len - 6);
+    ip = MDNS.queryHost(name, 1000);
+  } else if (!WiFi.hostByName(host, ip)) {
+    ip = IPAddress(0, 0, 0, 0);
+  }
+  String txt = ip.toString();
+  if (txt == "0.0.0.0" || txt.length() == 0) {
+    Serial.printf("[mDNS] %s олдсонгүй (компьютер унтраастай эсвэл өөр Wi-Fi-д байна)\n", host);
+    return false;
+  }
+  hostCopy(sv.ip, sizeof(sv.ip), txt.c_str(), txt.length());
+  Serial.printf("[mDNS] %s -> %s\n", host, sv.ip);
+  return true;
+}
+
+// Нэг сервер рүү илгээнэ. Буцаах: true = амжилттай (200)
+static bool postTo(int k, const String& body) {
+  SrvSlot& sv = servers[k];
+  uint32_t now = millis();
+  if (placeholder(k)) return false;                                   // жишээ хаяг → алгасна
+  if (sv.nextTry && (int32_t)(now - sv.nextTry) < 0) return false;   // унтарсан → хүлээнэ
+
+  String url;
+  if (isHttps(k)) {
+    // Интернэт сервер (Vercel): нэрээр нь (SNI) TLS-ээр холбогдоно. Гэрчилгээ шалгахгүй (setInsecure).
+    url = SERVER_LIST[k];
+    while (url.endsWith("/")) url.remove(url.length() - 1);
+    url += "/api/ingest";
+    static bool tlsInit[8] = {};
+    if (k < 8 && !tlsInit[k]) { sv.tls.setInsecure(); tlsInit[k] = true; }
+    sv.http.begin(sv.tls, url);
+    sv.http.setConnectTimeout(5000);
+    sv.http.setTimeout(5000);
+  } else {
+    if (!sv.ip[0] && !resolveServer(k)) { sv.nextTry = millis() + RETRY_OFFLINE_MS; return false; }
+    url = String("http://") + sv.ip + ":" + String(SERVER_PORT) + "/api/ingest";
+    sv.http.begin(sv.tcp, url);
+    sv.http.setConnectTimeout(600);
+    sv.http.setTimeout(1500);
+  }
+  sv.http.setReuse(true);
+  sv.http.addHeader("Content-Type", "application/json");
+  sv.http.addHeader("x-device-key", DEVICE_KEY);
+  int code = sv.http.POST(body);
+  bool ok = code == 200;
+  if (ok) {
+    if (sv.fails || sv.nextTry) Serial.printf("[HTTP] %s (%s) холбогдлоо\n", SERVER_LIST[k], sv.ip);
+    sv.fails = 0;
+    sv.nextTry = 0;
+    parseResponse(sv.http.getString());
+  } else if (code < 0) {
+    Serial.printf("[HTTP] %s (%s) хариу алга: %s\n", SERVER_LIST[k], sv.ip, HTTPClient::errorToString(code).c_str());
+    if (++sv.fails >= (isHttps(k) ? 3 : 2)) {   // IP солигдсон эсвэл унтарсан → дахин хайна
+      sv.ip[0] = 0;
+      sv.fails = 0;
+      sv.nextTry = millis() + (isHttps(k) ? 5000 : RETRY_OFFLINE_MS);
+    }
+  } else if (code == 401) {
+    Serial.printf("[HTTP] %s: 401 — DEVICE_KEY нь .env.local-ийн DEVICE_API_KEY-тэй таарахгүй\n", SERVER_LIST[k]);
+  } else {
+    Serial.printf("[HTTP] %s: серверийн алдаа %d\n", SERVER_LIST[k], code);
+  }
+  sv.http.end();
+  return ok;
+}
+
 static Sample batch[MAX_PER_POST];
-static WiFiClient tcp;
-static HTTPClient http;
 
 static void sendBatch() {
   if (WiFi.status() != WL_CONNECTED) return;
@@ -484,40 +599,27 @@ static void sendBatch() {
   }
   body += "]}";
 
-  static const String url = String("http://") + SERVER_HOST + ":" + String(SERVER_PORT) + "/api/ingest";
-  http.begin(tcp, url);
-  http.setReuse(true);
-  http.setTimeout(1500);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("x-device-key", DEVICE_KEY);
-  int code = http.POST(body);
-
-  if (code == 200) {
-    parseResponse(http.getString());
+  bool any = false;
+  for (int k = 0; k < SERVER_N; k++) any |= postTo(k, body);
+  if (any) {
     lastOkResponse = millis();
     postFailures = 0;
   } else {
     postFailures++;
-    if (code < 0) {
-      Serial.printf("[HTTP] сервертэй холбогдсонгүй (%s) — SERVER_HOST, порт, firewall шалга\n",
-                    HTTPClient::errorToString(code).c_str());
-      putBack(batch, n);   // өгөгдлийг алдахгүй, дараа дахин илгээнэ
-    } else if (code == 401) {
-      Serial.println("[HTTP] 401 — DEVICE_KEY нь .env.local-ийн DEVICE_API_KEY-тэй таарахгүй байна");
-    } else {
-      Serial.printf("[HTTP] серверийн алдаа %d\n", code);
-    }
+    putBack(batch, n);   // аль ч сервер аваагүй → өгөгдлийг алдахгүй, дараа дахин илгээнэ
   }
-  http.end();
 }
 
 // ---------------------------------------------------------------- сервер рүү илгээх task
 // HTTP хүсэлт 50–500 мс блоклодог тул тусдаа task-д ажиллуулна → OLED болон веб саатахгүй
 static void netTask(void*) {
   uint32_t last = 0;
+  bool cloud = false;
+  for (int k = 0; k < SERVER_N; k++) cloud |= isHttps(k) && !placeholder(k);
+  const uint32_t every = cloud ? SEND_EVERY_CLOUD_MS : SEND_EVERY_MS;
   while (true) {
     uint32_t now = millis();
-    if (now - last >= SEND_EVERY_MS) { last = now; sendBatch(); }
+    if (now - last >= every) { last = now; sendBatch(); }
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
@@ -690,9 +792,9 @@ void loop() {
   ensureWifi();
   bool connected = WiFi.status() == WL_CONNECTED;
   if (connected && !wasConnected) {
-    Serial.printf("[WiFi] холбогдлоо: IP %s → сервер http://%s:%d, веб шууд ws://%s:%u\n",
-                  WiFi.localIP().toString().c_str(), SERVER_HOST, SERVER_PORT,
-                  WiFi.localIP().toString().c_str(), (unsigned)WS_PORT);
+    Serial.printf("[WiFi] холбогдлоо: IP %s → сервер http://%s:%d, веб шууд ws://%s:%u (эсвэл ws://" MDNS_NAME ".local:%u)\n",
+                  WiFi.localIP().toString().c_str(), SERVER_LIST[0], SERVER_PORT,
+                  WiFi.localIP().toString().c_str(), (unsigned)WS_PORT, (unsigned)WS_PORT);
   }
   wasConnected = connected;
 

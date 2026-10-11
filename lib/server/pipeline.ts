@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { ACTIVITIES } from "../activities";
 import type { DeviceResponse, IngestPayload, Prediction, Snapshot } from "../types";
 import { createClassifier, type Classifier } from "./classifier";
-import { getRepository } from "./store";
+import { getRepository, type MemoryRepository } from "./store";
 
 /**
  * Өгөгдөл боловсруулах урсгал:
@@ -14,10 +14,13 @@ const OFFLINE_MS = 10_000;
 const g = globalThis as unknown as { __bus?: EventEmitter; __clf?: Classifier; __lastFall?: Map<string, number> };
 export const bus = (g.__bus ??= new EventEmitter().setMaxListeners(100));
 const classifier = (g.__clf ??= createClassifier());
-const lastFall = (g.__lastFall ??= new Map());
+export const lastFall = (g.__lastFall ??= new Map<string, number>());
 
-export async function ingest(p: IngestPayload, opts: { simulated?: boolean } = {}): Promise<Prediction | null> {
-  const repo = getRepository();
+export async function ingest(
+  p: IngestPayload,
+  opts: { simulated?: boolean } = {},
+  repo: MemoryRepository = getRepository(),
+): Promise<Prediction | null> {
   const now = Date.now();
   repo.upsertDevice({
     deviceId: p.deviceId,
@@ -64,8 +67,8 @@ export function toDeviceResponse(pred: Prediction | null): DeviceResponse {
 }
 
 /** Веб дээр харуулах төхөөрөмж: сүүлд идэвхтэй байсан бодит төхөөрөмж, байхгүй бол demo */
-export function activeDeviceId(): string | null {
-  const devices = getRepository().listDevices();
+export function activeDeviceId(repo: MemoryRepository = getRepository()): string | null {
+  const devices = repo.listDevices();
   if (!devices.length) return null;
   const real = devices.filter((d) => !d.simulated).sort((a, b) => b.lastSeen - a.lastSeen)[0];
   if (real && Date.now() - real.lastSeen < OFFLINE_MS) return real.deviceId;
@@ -78,8 +81,7 @@ export function startOfToday(now = Date.now()) {
   return d.getTime();
 }
 
-export function buildSnapshot(deviceId = activeDeviceId()): Snapshot {
-  const repo = getRepository();
+export function buildSnapshot(deviceId = activeDeviceId(), repo: MemoryRepository = getRepository()): Snapshot {
   const now = Date.now();
   if (!deviceId) {
     return { now, device: null, current: null, currentSince: null, signal: [], today: { sitting: 0, standing: 0, walking: 0, running: 0, lying: 0, fall: 0 }, timeline: [], alerts: [], gps: null };

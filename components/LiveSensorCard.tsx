@@ -143,6 +143,8 @@ interface Readout {
 export function LiveSensorCard() {
   const { stream, snap, ws } = useLive();
   const [editing, setEditing] = useState(false);
+  const [secure, setSecure] = useState(false); // HTTPS (deploy хийсэн) хуудас уу
+  useEffect(() => setSecure(window.location.protocol === "https:"), []);
   const [draft, setDraft] = useState("");
   const canvas = useScope(stream);
   const [src, setSrc] = useState<SampleStream["source"]>(null);
@@ -218,12 +220,16 @@ export function LiveSensorCard() {
             src === "ws" && !ro.stale ? "bg-[#30b07a]/15 text-[#30b07a]" : "bg-fill text-muted"
           }`}
         >
-          {src === "ws" && !ro.stale ? "ESP32 → веб шууд (WebSocket)" : src === "sse" && !ro.stale ? "Сервероор дамжиж (SSE)" : "Холболтгүй"}
+          {src === "ws" && !ro.stale ? "ESP32 → веб шууд (WebSocket)" : src === "sse" && !ro.stale ? "Сервероор дамжиж" : "Холболтгүй"}
         </span>
         <span>
-          {ws.url ? `${ws.url} · ${WS_LABEL[ws.state]}` : "ESP32-ийн IP хүлээж байна"}
+          {secure
+            ? "Интернэтээр: ESP32 → сервер → веб (≈0.5 сек)"
+            : ws.url
+              ? `${ws.url} · ${WS_LABEL[ws.state]}`
+              : "ESP32-ийн IP хүлээж байна"}
         </span>
-        {editing ? (
+        {secure ? null : editing ? (
           <form
             className="flex items-center gap-1"
             onSubmit={(e) => {
@@ -236,8 +242,8 @@ export function LiveSensorCard() {
               autoFocus
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="192.168.1.50 (хоосон = автомат)"
-              className="w-52 rounded-lg bg-fill px-2 py-1 text-ink outline-none"
+              placeholder="192.168.1.50 эсвэл motioncare.local"
+              className="w-60 rounded-lg bg-fill px-2 py-1 text-ink outline-none"
             />
             <button className="rounded-lg bg-[#0a84ff] px-2 py-1 font-medium text-white">Хадгалах</button>
           </form>

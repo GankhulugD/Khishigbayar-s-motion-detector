@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { ingest, toDeviceResponse } from "@/lib/server/pipeline";
 import type { IngestPayload } from "@/lib/types";
+import { alignClock, type DeviceClock } from "@/lib/server/clock";
+import { cloudEnabled, cloudIngest } from "@/lib/server/cloud";
 
 export const dynamic = "force-dynamic";
 
@@ -29,20 +31,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "нэг удаад 500-аас ихгүй хэмжилт" }, { status: 413 });
   }
 
-  // Төхөөрөмж millis() илгээдэг тул серверийн цагт шилжүүлнэ.
-  // Төхөөрөмж бүрийн зөрүүг хадгалж, багц хоорондын цагийн үсрэлтээс сэргийлнэ.
-  const now = Date.now();
-  const last = body.samples[body.samples.length - 1].t;
-  const g = globalThis as unknown as { __clock?: Map<string, { offset: number; lastT: number }> };
-  const clock = (g.__clock ??= new Map());
-  const prev = clock.get(body.deviceId);
-  let offset: number;
-  if (Math.abs(now - last) <= 60_000) offset = 0; // төхөөрөмж бодит цаг илгээсэн
-  else if (!prev || last < prev.lastT || now - (last + prev.offset) < -1_000 || now - (last + prev.offset) > 30_000)
-    offset = now - last; // анхны холболт, reboot эсвэл их зөрүү
-  else offset = prev.offset;
-  clock.set(body.deviceId, { offset, lastT: last });
-  const samples = body.samples.map((s) => ({ ...s, t: s.t + offset }));
+  if (cloudEnabled) return NextResponse.json(await cloudIngest(body));
+
+  const g = globalThis as unknown as { __clock?: Map<string, DeviceClock> };
+  const clocks = (g.__clock ??= new Map());
+  const { samples, clock } = alignClock(body.samples, clocks.get(body.deviceId));
+  clocks.set(body.deviceId, clock);
 
   const pred = await ingest({ ...body, samples });
   return NextResponse.json(toDeviceResponse(pred));

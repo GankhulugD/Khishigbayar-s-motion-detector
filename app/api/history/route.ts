@@ -2,13 +2,15 @@ import { NextResponse } from "next/server";
 import { activeDeviceId, startOfToday } from "@/lib/server/pipeline";
 import { ensureSimulator } from "@/lib/server/simulator";
 import { getRepository } from "@/lib/server/store";
+import { cloudEnabled, cloudHistory } from "@/lib/server/cloud";
 
 export const dynamic = "force-dynamic";
 
 /** GET /api/history?device=<id> → өнөөдрийн цаг тутмын хуваарилалт ба хэсгүүд */
 export async function GET(req: Request) {
-  ensureSimulator();
   const url = new URL(req.url);
+  if (cloudEnabled) return NextResponse.json(await cloudHistory(url.searchParams.get("device")));
+  ensureSimulator();
   const device = url.searchParams.get("device") ?? activeDeviceId();
   if (!device) return NextResponse.json({ hours: [], segments: [] });
   const repo = getRepository();

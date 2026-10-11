@@ -25,7 +25,7 @@ export interface Repository {
 const MAX_SAMPLES = 3000; // ~60 сек @ 50 Hz
 const MAX_SEGMENTS = 5000;
 
-interface DeviceState {
+export interface DeviceState {
   samples: SensorSample[];
   predictions: Prediction[];
   segments: Segment[];
@@ -33,7 +33,7 @@ interface DeviceState {
   alerts: Alert[];
 }
 
-class MemoryRepository implements Repository {
+export class MemoryRepository implements Repository {
   private devices = new Map<string, DeviceStatus>();
   private state = new Map<string, DeviceState>();
   private alertSeq = 0;
@@ -91,6 +91,16 @@ class MemoryRepository implements Repository {
     if (last && last.activity === p.activity && p.t - last.end < 5000) last.end = p.t;
     else st.segments.push({ activity: p.activity, start: last && p.t - last.end < 5000 ? last.end : p.t - 1000, end: p.t });
     if (st.segments.length > MAX_SEGMENTS) st.segments.shift();
+  }
+
+  /** Үүлэн (Vercel + Redis) горим: төхөөрөмжийн бүх төлөвийг гаргаж / ачаалах */
+  exportDevice(id: string): { device: DeviceStatus | undefined; state: DeviceState; alertSeq: number } {
+    return { device: this.devices.get(id), state: this.s(id), alertSeq: this.alertSeq };
+  }
+  importDevice(device: DeviceStatus, state: Partial<DeviceState>, alertSeq = 0) {
+    this.devices.set(device.deviceId, device);
+    this.state.set(device.deviceId, { samples: [], predictions: [], segments: [], gps: null, alerts: [], ...state });
+    this.alertSeq = Math.max(this.alertSeq, alertSeq);
   }
 
   /** Simulator-ийн түүхэн өгөгдөл нөхөх зориулалттай */

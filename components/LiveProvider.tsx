@@ -89,8 +89,39 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
       pushSamples(stream.current, "sse:" + deviceId, "sse", samples);
     };
 
+    // Үүлэн (Vercel) горим: /api/live-аас 0.5 сек тутам хураангуй төлөв + шинэ хэмжилт авна
+    let cloudTimer: ReturnType<typeof setTimeout> | null = null;
+    let cloudDevice: string | null = null;
+    const cloudPoll = async () => {
+      if (closed) return;
+      const st = stream.current;
+      const since = st.source === "sse" && st.deviceId === "sse:" + cloudDevice ? st.lastT : 0;
+      try {
+        const q = new URLSearchParams({ since: String(since) });
+        if (cloudDevice) q.set("device", cloudDevice);
+        const r = await fetch(`/api/live?${q}`, { cache: "no-store" });
+        if (r.ok) {
+          const j = (await r.json()) as { deviceId: string | null; snap: Snapshot; samples: SensorSample[] };
+          cloudDevice = j.deviceId;
+          setSnap(j.snap);
+          setConn("live");
+          if (j.deviceId && performance.now() - wsAlive.current >= 1500) pushSamples(st, "sse:" + j.deviceId, "sse", j.samples);
+        } else setConn("reconnecting");
+      } catch {
+        setConn("reconnecting");
+      }
+      cloudTimer = setTimeout(cloudPoll, 500);
+    };
+
     const connect = () => {
       es = new EventSource("/api/stream");
+      es.addEventListener("mode", (e) => {
+        if ((e as MessageEvent).data !== "poll") return;
+        es?.close();
+        es = null;
+        stopPolling();
+        if (!cloudTimer) void cloudPoll();
+      });
       es.onopen = () => {
         setConn("live");
         stopPolling();
@@ -101,6 +132,10 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
       };
       es.addEventListener("samples", onSamples);
       es.onerror = () => {
+        if (cloudTimer) {
+          es?.close();
+          return; // үүлэн горимд SSE хэрэглэхгүй
+        }
         setConn("reconnecting");
         startPolling();
         es?.close();
@@ -112,6 +147,7 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
       closed = true;
       es?.close();
       stopPolling();
+      if (cloudTimer) clearTimeout(cloudTimer);
     };
   }, []);
 
@@ -129,7 +165,9 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   };
   const devIp = snap?.device && !snap.device.simulated ? snap.device.ip : undefined;
-  const wsUrl = normalizeWs(manual) ?? (devIp ? `ws://${devIp}:${WS_PORT}` : null);
+  // HTTPS хуудаснаас (жишээ нь Vercel) ws:// руу хөтөч холбогдохыг хориглодог → зөвхөн локал (http) үед
+  const httpPage = typeof window !== "undefined" && window.location.protocol === "http:";
+  const wsUrl = httpPage ? (normalizeWs(manual) ?? (devIp ? `ws://${devIp}:${WS_PORT}` : null)) : null;
 
   useEffect(() => {
     if (!wsUrl) {
