@@ -7,10 +7,10 @@ import {
   DeviceCard,
   LocationCard,
   ScoresCard,
-  SignalCard,
   TimelineCard,
   TodayCard,
 } from "@/components/dashboard";
+import { LiveSensorCard } from "@/components/LiveSensorCard";
 import { PageTitle, Skeleton } from "@/components/ui";
 
 const WEEKDAYS = ["Ням", "Даваа", "Мягмар", "Лхагва", "Пүрэв", "Баасан", "Бямба"];
@@ -35,7 +35,7 @@ export default function SummaryPage() {
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="space-y-4 lg:col-span-2">
             <CurrentActivityCard snap={snap} />
-            <SignalCard snap={snap} />
+            <LiveSensorCard />
             <div className="grid gap-4 md:grid-cols-2">
               <TodayCard snap={snap} />
               <TimelineCard snap={snap} />

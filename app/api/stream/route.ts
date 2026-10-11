@@ -1,10 +1,16 @@
-import { bus, buildSnapshot } from "@/lib/server/pipeline";
+import { activeDeviceId, bus, buildSnapshot } from "@/lib/server/pipeline";
+import { getRepository } from "@/lib/server/store";
+import type { SensorSample } from "@/lib/types";
 import { ensureSimulator } from "@/lib/server/simulator";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** Server-Sent Events: веб самбар руу бодит хугацааны төлөвийг түлхэнэ */
+/**
+ * Server-Sent Events:
+ *   event "message" — хураангуй төлөв (ангилал, түүх ...) ~250 мс тутам
+ *   event "samples" — мэдрэгчийн түүхий утгууд, төхөөрөмжөөс ирэнгүүт шууд
+ */
 export async function GET(req: Request) {
   ensureSimulator();
   const enc = new TextEncoder();
@@ -28,12 +34,27 @@ export async function GET(req: Request) {
           setTimeout(send, 250);
         }
       };
+      const sendSamples = (deviceId: string, samples: SensorSample[]) => {
+        try {
+          controller.enqueue(enc.encode(`event: samples\ndata: ${JSON.stringify({ deviceId, samples })}\n\n`));
+        } catch {
+          cleanup();
+        }
+      };
+      const onSamples = (deviceId: string, samples: SensorSample[]) => {
+        if (deviceId === activeDeviceId()) sendSamples(deviceId, samples);
+      };
       const heartbeat = setInterval(send, 2000);
       bus.on("update", onUpdate);
+      bus.on("samples", onSamples);
       send();
+      // Шинээр холбогдсон браузерт сүүлийн 8 секундийг нэг дор өгнө
+      const dev = activeDeviceId();
+      if (dev) sendSamples(dev, getRepository().getWindow(dev, 8000));
       cleanup = () => {
         clearInterval(heartbeat);
         bus.off("update", onUpdate);
+        bus.off("samples", onSamples);
       };
       req.signal.addEventListener("abort", () => {
         cleanup();
@@ -47,6 +68,8 @@ export async function GET(req: Request) {
 
   return new Response(stream, {
     headers: {
+      "X-Accel-Buffering": "no",
+      "Content-Encoding": "none",
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-cache, no-transform",
       connection: "keep-alive",

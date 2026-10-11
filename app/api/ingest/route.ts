@@ -29,10 +29,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "нэг удаад 500-аас ихгүй хэмжилт" }, { status: 413 });
   }
 
-  // Төхөөрөмжийн цаг тохируулаагүй (millis()) байж болох тул серверийн цагт шилжүүлнэ
+  // Төхөөрөмж millis() илгээдэг тул серверийн цагт шилжүүлнэ.
+  // Төхөөрөмж бүрийн зөрүүг хадгалж, багц хоорондын цагийн үсрэлтээс сэргийлнэ.
   const now = Date.now();
   const last = body.samples[body.samples.length - 1].t;
-  const offset = Math.abs(now - last) > 60_000 ? now - last : 0;
+  const g = globalThis as unknown as { __clock?: Map<string, { offset: number; lastT: number }> };
+  const clock = (g.__clock ??= new Map());
+  const prev = clock.get(body.deviceId);
+  let offset: number;
+  if (Math.abs(now - last) <= 60_000) offset = 0; // төхөөрөмж бодит цаг илгээсэн
+  else if (!prev || last < prev.lastT || now - (last + prev.offset) < -1_000 || now - (last + prev.offset) > 30_000)
+    offset = now - last; // анхны холболт, reboot эсвэл их зөрүү
+  else offset = prev.offset;
+  clock.set(body.deviceId, { offset, lastT: last });
   const samples = body.samples.map((s) => ({ ...s, t: s.t + offset }));
 
   const pred = await ingest({ ...body, samples });

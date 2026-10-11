@@ -33,6 +33,8 @@ export interface IngestPayload {
   gps?: Omit<GpsFix, "t"> & { t?: number };
   battery?: number; // 0–100
   rssi?: number; // dBm
+  /** Төхөөрөмжийн LAN IP — веб ws://<ip>:81-ээр шууд холбогдоно */
+  ip?: string;
 }
 
 /** ML загварын гаргасан үр дүн */
@@ -73,6 +75,7 @@ export interface DeviceStatus {
   rssi?: number;
   sampleRateHz: number;
   simulated: boolean;
+  ip?: string;
 }
 
 /** Вэб рүү SSE-ээр секунд тутам илгээгдэх хураангуй төлөв */

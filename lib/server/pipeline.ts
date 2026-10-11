@@ -25,10 +25,13 @@ export async function ingest(p: IngestPayload, opts: { simulated?: boolean } = {
     lastSeen: now,
     battery: p.battery,
     rssi: p.rssi,
+    ip: p.ip,
     simulated: opts.simulated ?? false,
     name: opts.simulated ? "Demo төхөөрөмж" : p.deviceId,
   });
   repo.addSamples(p.deviceId, p.samples);
+  // Түүхий мэдрэгчийн өгөгдлийг веб рүү шууд дамжуулна (ангиллыг хүлээхгүй)
+  bus.emit("samples", p.deviceId, p.samples);
   if (p.gps) repo.setGps(p.deviceId, { ...p.gps, t: p.gps.t ?? now });
 
   const pred = await classifier.predict(p.deviceId, repo.getWindow(p.deviceId, WINDOW_MS));

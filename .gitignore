@@ -9,3 +9,4 @@ next-env.d.ts
 __pycache__
 ml/.venv
 ml/models/*.pkl
+firmware/**/config.h
